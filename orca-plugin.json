@@ -3,7 +3,7 @@
   "manifestVersion": 2,
   "id": "flow-lens",
   "name": "Flow Lens",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Показывает этапы плана агента и ход выполнения в рабочей области Orca.",
   "repository": "https://github.com/execaus/flow-lens",
   "engines": { "orca": ">=1.4.248" },
@@ -12,10 +12,18 @@
   "main": "src/worker.mjs",
   "capabilities": [
     { "kind": "workspace:read" },
-    { "kind": "agent:read" }
+    { "kind": "agent:read" },
+    { "kind": "settings:own" }
   ],
   "contributes": {
-    "hooks": [{ "event": "agent.tool.after" }],
+    "hooks": [{ "event": "agent.tool.after" }, { "event": "agent.launch.before" }],
+    "settings": [{
+      "key": "automaticPlans",
+      "title": "Подключать план при запуске агента",
+      "description": "Передаёт временную папку при запуске новой сессии. Требуется настроенный хук запуска агента.",
+      "type": "boolean",
+      "default": false
+    }],
     "panels": [{
       "id": "flow",
       "title": "Flow Lens",

@@ -9,7 +9,7 @@ const statusLabels = {
 
 type Step = { title: string; status: keyof typeof statusLabels }
 type FileMode = 'temp' | 'worktree'
-type PlanFile = { path: string; mode: FileMode; state: 'waiting' | 'ready' | 'invalid' }
+type PlanFile = { path: string; mode: FileMode; state: 'waiting' | 'ready' | 'invalid'; automatic: boolean }
 type Agent = { terminalId: string; sessionId: string | null; label: string; steps: Step[]; file: PlanFile | null }
 type Snapshot = { workspaceId: string | null; agents: Agent[] }
 type PrepareInput = { workspaceId: string; terminalId: string; sessionId: string | null; mode: FileMode }
@@ -139,7 +139,7 @@ export default function FlowLens() {
         />
       ) : <Text weight="semibold">{agent?.label}</Text>}
       {agent && steps.length === 0 && agent.file?.state !== 'ready' && (
-        <Text muted>{agent.file ? 'Ожидаю план от агента.' : 'Подключите файл плана или попросите агента опубликовать встроенный план.'}</Text>
+        <Text muted>{agent.file?.automatic ? 'План появится, когда агент его запишет.' : agent.file ? 'Ожидаю план от агента.' : 'Подключите файл плана или попросите агента опубликовать встроенный план.'}</Text>
       )}
       {agent?.file?.state === 'ready' && steps.length === 0 && <Text muted>В файле нет этапов.</Text>}
       {agent?.file?.state === 'invalid' && (

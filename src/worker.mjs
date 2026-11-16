@@ -1,4 +1,6 @@
+import { realpath } from 'node:fs/promises'
 import { createPlanFile, normalizeSteps, readPlanFile, removeTemporaryDirectory } from './plan-file.mjs'
+import { createSessionRoot, sessionDirectoryVariable, sessionPlanFile } from './session-plan.mjs'
 
 const planTools = new Map([
   ['update_plan', ['plan', 'step']],
@@ -24,6 +26,8 @@ export default function activate(orca) {
   const channels = new Map()
   const temporaryDirectories = new Set()
   const preparing = new Set()
+  let sessionRoot
+  let creatingSessionRoot
   let checking = false
   let stopped = false
   let timer
@@ -33,16 +37,26 @@ export default function activate(orca) {
     if (!stopped) orca.panels.post('flow.changed', { workspaceId })
   }
 
+  function watchChannel(key, workspaceId, file, automatic = false) {
+    const channel = { workspaceId, file, automatic, connected: !automatic, state: 'waiting', steps: null }
+    channels.set(key, channel)
+    timer ??= setInterval(() => void readFiles(), 1500)
+    return channel
+  }
+
   async function readFiles() {
     if (checking) return
     checking = true
     const changed = new Set()
     try {
       await Promise.all([...channels.values()].map(async (channel) => {
-        const result = await readPlanFile(channel.file)
-        const signature = JSON.stringify(result)
+        const connected = !channel.automatic ||
+          (await realpath(channel.file.directory).catch(() => null)) === channel.file.directory
+        const result = connected ? await readPlanFile(channel.file) : { state: 'waiting' }
+        const signature = JSON.stringify([connected, result])
         if (channel.signature === signature) return
         channel.signature = signature
+        channel.connected = connected
         channel.state = result.state
         if (result.state === 'ready') channel.steps = result.steps
         if (result.state === 'waiting') channel.steps = null
@@ -59,6 +73,31 @@ export default function activate(orca) {
     clearInterval(timer)
     await Promise.allSettled([...temporaryDirectories].map(removeTemporaryDirectory))
   }
+
+  orca.hooks.on('agent.launch.before', async (event, next) => {
+    if (!event.workspaceId || stopped) return
+    try {
+      const { settings } = await orca.host.call('settings.get')
+      if (settings.automaticPlans !== true || stopped) return
+      if (!sessionRoot) {
+        creatingSessionRoot ??= createSessionRoot().then(async (directory) => {
+          if (stopped) {
+            await removeTemporaryDirectory(directory)
+            return
+          }
+          temporaryDirectories.add(directory)
+          sessionRoot = directory
+        }).finally(() => { creatingSessionRoot = null })
+        await creatingSessionRoot
+      }
+      const directory = sessionRoot
+      if (directory && !stopped) {
+        return next({ ...event, env: { ...event.env, [sessionDirectoryVariable]: directory } })
+      }
+    } catch {
+      // Passing keeps the original launch working if settings or temporary storage fail.
+    }
+  })
 
   async function currentWorkspace() {
     const context = await orca.host.call('workspace.readContext')
@@ -105,7 +144,8 @@ export default function activate(orca) {
       return { error: 'session-changed' }
     }
     const key = JSON.stringify([workspaceId, terminalId, sessionId])
-    if (channels.get(key)?.file.mode === mode) return { error: null }
+    const channel = channels.get(key)
+    if (!channel?.automatic && channel?.file.mode === mode) return { error: null }
     if (preparing.has(key)) return { error: 'busy' }
     preparing.add(key)
 
@@ -124,8 +164,7 @@ export default function activate(orca) {
         return { error: 'session-changed' }
       }
       if (mode === 'temp') temporaryDirectories.add(file.directory)
-      channels.set(key, { workspaceId, file, state: 'waiting', steps: null, signature: '{"state":"waiting"}' })
-      timer ??= setInterval(() => void readFiles(), 1500)
+      watchChannel(key, workspaceId, file)
       postChanged(workspaceId)
       return { error: null }
     } catch (error) {
@@ -145,13 +184,19 @@ export default function activate(orca) {
       agents: agents.map((agent) => {
         const sessionId = agent.sessionId ?? null
         const plan = plans.get(JSON.stringify([workspaceId, agent.terminalId]))
-        const channel = channels.get(JSON.stringify([workspaceId, agent.terminalId, sessionId]))
+        const key = JSON.stringify([workspaceId, agent.terminalId, sessionId])
+        let channel = channels.get(key)
+        if (!channel && sessionRoot && sessionId) {
+          channel = watchChannel(key, workspaceId, sessionPlanFile(sessionRoot, sessionId), true)
+        }
         return {
           terminalId: agent.terminalId,
           sessionId,
           label: agent.title || agent.agent || 'Агент',
           steps: channel?.steps ?? (plan?.sessionId === sessionId ? plan.steps : []),
-          file: channel ? { path: channel.file.path, mode: channel.file.mode, state: channel.state } : null
+          file: channel?.connected
+            ? { path: channel.file.path, mode: channel.file.mode, state: channel.state, automatic: channel.automatic }
+            : null
         }
       })
     }
