@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stablyai/orca/main/docs/schemas/plugins/orca-plugin.v2.schema.json",
+  "manifestVersion": 2,
+  "id": "flow-lens",
+  "name": "Flow Lens",
+  "version": "0.1.0",
+  "description": "Показывает этапы плана агента и ход выполнения в рабочей области Orca.",
+  "repository": "https://github.com/execaus/flow-lens",
+  "engines": { "orca": ">=1.4.248" },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.mjs",
+  "capabilities": [
+    { "kind": "workspace:read" },
+    { "kind": "agent:read" }
+  ],
+  "contributes": {
+    "hooks": [{ "event": "agent.tool.after" }],
+    "panels": [{
+      "id": "flow",
+      "title": "Flow Lens",
+      "icon": "layers",
+      "ui": "components",
+      "entry": "src/panel.tsx"
+    }]
+  }
+}
